@@ -215,7 +215,7 @@
           },
           "storageProfile": {
             "imageReference": {
-              "id": "/subscriptions/877d4dbe-5af8-4b6e-835a-a40d1f31c5da/resourceGroups/aec-mgmt-rg/providers/Microsoft.Compute/galleries/SharedImageGallery/images/aiadvm-image-20211702/versions/0.0.1"
+              "id": "/subscriptions/c46dc7a4-3166-4666-b533-181f0200c271/resourceGroups/cloudlabs-mgmt/providers/Microsoft.Compute/galleries/CloudlabsCustomImageGallery/images/AI-MLOps-vm-image-20220303/versions/0.0.1"
             },
             "osDisk": {
               "name": "[concat(variables('vmName'),'OSDisk')]",
