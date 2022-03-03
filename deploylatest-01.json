@@ -1,0 +1,461 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "adminUsername": {
+      "type": "string",
+      "defaultValue": "demouser",
+      "metadata": {
+        "description": "Username for the Virtual Machine."
+      }
+    },
+    "adminPassword": {
+      "type": "securestring",
+      "defaultValue": "Password.1!!",
+      "metadata": {
+        "description": "Password for the Virtual Machine."
+      }
+    },
+    "AzureUserName": {
+      "type": "string"
+    },
+    "AzurePassword": {
+      "type": "securestring"
+    },
+    "azuserobjectid": {
+      "type": "string"
+    },
+    "ODLID": {
+      "type": "string"
+    },
+    "DeploymentID": {
+      "type": "string"
+    },
+    "amlWorkspaceName": {
+      "type": "string",
+      "defaultValue": "ai-in-a-day-",
+      "metadata": {
+        "description": "The name of the Azure Databricks workspace to create."
+      }
+    },
+    "InstallCloudLabsShadow": {
+      "type": "string",
+      "defaultValue": "yes",
+      "allowedValues": [
+        "yes",
+        "no"
+      ]
+    },
+    "subnetName": {
+      "defaultValue": "",
+      "type": "string"
+    },
+    "diskStorageType": {
+      "defaultValue": "Premium_LRS",
+      "allowedValues": [
+        "Standard_LRS",
+        "Premium_LRS"
+      ],
+      "type": "String"
+    }
+  },
+  "variables": {
+    "cloudlabsCommon": "[concat(' -AzureUserName ', parameters('AzureUserName'), ' -AzurePassword ', parameters('AzurePassword'), ' -AzureTenantID ', variables('AzureTenantID'), ' -AzureSubscriptionID ', variables('AzureSubscriptionID'), ' -ODLID ', parameters('ODLID'), ' -DeploymentID ', parameters('DeploymentID'),' -InstallCloudLabsShadow ', parameters('InstallCloudLabsShadow'), ' -rgName ', variables('rgname'))]",
+    "AzureSubscriptionID": "[subscription().subscriptionId]",
+    "AzureTenantID": "[subscription().tenantId]",
+    "networkSecurityGroupName": "nsg-jumpvm",
+    "rgname": "[resourceGroup().name]",
+    "location": "[resourceGroup().location]",
+    "nicName": "[concat(variables('vmname'), '-nic')]",
+    "addressPrefix": "10.0.0.0/16",
+    "subnetName": "Subnet",
+    "subnetPrefix": "10.0.0.0/24",
+    "subnetRef": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('virtualNetworkName'), variables('subnetName'))]",
+    "vmName": "[concat('labvm-', parameters('DeploymentID'))]",
+    "virtualNetworkName": "vnet1",
+    "publicIPAddressName": "pip-jumpvm",
+    "dnsNameForPublicIP": "[concat('vm-', uniqueString(resourceGroup().id))]",
+    "storageaccountname": "[concat('aiinadaystorage', parameters('DeploymentID'))]",
+    "storageAccountId": "[concat('/subscriptions/', variables('AzureSubscriptionID'), '/resourcegroups/', variables('rgname'),'/providers/Microsoft.Storage/storageAccounts/',variables('storageaccountname'))]",
+    "resourceNamePrefix": "aiinaday",
+    "mlstorageaccountname": "[concat('mlstrg', parameters('DeploymentID'))]",
+    "keyvaultname": "[concat(variables('resourceNamePrefix'), '-kv-', parameters('DeploymentID'))]",
+    "appinsightname": "[concat(variables('resourceNamePrefix'), '-appinsight-', parameters('DeploymentID'))]",
+    "containerregistryname": "[concat('aiinadaycr', parameters('DeploymentID'))]",
+    "amlworkspacename": "[concat(parameters('amlWorkspaceName'), parameters('DeploymentID'))]",
+    "keyVaultId": "[concat('/subscriptions/', variables('AzureSubscriptionID'), '/resourcegroups/', variables('rgname'),'/providers/Microsoft.KeyVault/vaults/',variables('keyvaultname'))]",
+    "mlstorageAccountId": "[concat('/subscriptions/', variables('AzureSubscriptionID'), '/resourcegroups/', variables('rgname'),'/providers/Microsoft.Storage/storageAccounts/',variables('mlstorageaccountname'))]",
+    "appInsightsId": "[concat('/subscriptions/', variables('AzureSubscriptionID'), '/resourcegroups/', variables('rgname'),'/providers/Microsoft.Insights/components/',variables('appinsightname'))]",
+    "containerRegistryId": "[concat('/subscriptions/', variables('AzureSubscriptionID'), '/resourcegroups/', variables('rgname'),'/providers/Microsoft.ContainerRegistry/registries/',variables('containerregistryname'))]",
+    "managedResourceGroupName": "[concat('databricks-rg-', variables('resourceNamePrefix'), '-', parameters('DeploymentID'))]",
+    "subnet": {
+      "id": "[resourceId(variables('rgname'), 'Microsoft.Network/virtualNetworks/subnets', variables('virtualNetworkName'), parameters('subnetName'))]"
+    }
+  },
+    "resources": [
+      {
+        "apiVersion": "2017-06-01",
+        "type": "Microsoft.Network/publicIPAddresses",
+        "name": "[variables('publicIPAddressName')]",
+        "location": "[variables('location')]",
+        "properties": {
+          "publicIPAllocationMethod": "Dynamic",
+          "dnsSettings": {
+            "domainNameLabel": "[variables('dnsNameForPublicIP')]"
+          }
+        }
+      },
+      {
+        "apiVersion": "2018-04-01",
+        "type": "Microsoft.Network/virtualNetworks",
+        "name": "[variables('virtualNetworkName')]",
+        "location": "[variables('location')]",
+        "properties": {
+          "addressSpace": {
+            "addressPrefixes": [
+              "[variables('addressPrefix')]"
+            ]
+          },
+          "subnets": [
+            {
+              "name": "[variables('subnetName')]",
+              "properties": {
+                "addressPrefix": "[variables('subnetPrefix')]"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "[variables('networkSecurityGroupName')]",
+        "type": "Microsoft.Network/networkSecurityGroups",
+        "apiVersion": "2017-06-01",
+        "location": "[variables('location')]",
+        "properties": {
+          "securityRules": [
+            {
+              "name": "default-allow-rdp",
+              "properties": {
+                "priority": 120,
+                "protocol": "*",
+                "access": "Allow",
+                "direction": "Inbound",
+                "sourceAddressPrefix": "*",
+                "sourcePortRange": "*",
+                "destinationAddressPrefix": "*",
+                "destinationPortRange": "3389"
+              }
+            },
+            {
+              "name": "sql",
+              "properties": {
+                "priority": 130,
+                "protocol": "*",
+                "access": "Allow",
+                "direction": "Inbound",
+                "sourceAddressPrefix": "*",
+                "sourcePortRange": "*",
+                "destinationAddressPrefix": "*",
+                "destinationPortRange": "1433"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "apiVersion": "2018-04-01",
+        "type": "Microsoft.Network/networkInterfaces",
+        "name": "[variables('nicName')]",
+        "location": "[variables('location')]",
+        "dependsOn": [
+          "[variables('publicIPAddressName')]",
+          "[variables('virtualNetworkName')]",
+          "[variables('networkSecurityGroupName')]"
+        ],
+        "properties": {
+          "ipConfigurations": [
+            {
+              "name": "ipconfig1",
+              "properties": {
+                "privateIPAllocationMethod": "Dynamic",
+                "publicIPAddress": {
+                  "id": "[resourceId('Microsoft.Network/publicIPAddresses',variables('publicIPAddressName'))]"
+                },
+                "subnet": {
+                  "id": "[variables('subnetRef')]"
+                }
+              }
+            }
+          ],
+          "networkSecurityGroup": {
+            "id": "[resourceId(resourceGroup().name, 'Microsoft.Network/networkSecurityGroups', variables('networkSecurityGroupName'))]"
+          }
+        }
+      },
+      {
+        "apiVersion": "2018-04-01",
+        "type": "Microsoft.Compute/virtualMachines",
+        "name": "[variables('vmName')]",
+        "location": "[variables('location')]",
+        "dependsOn": [
+          "[variables('nicName')]"
+        ],
+        "properties": {
+          "osProfile": {
+            "computerName": "[variables('vmName')]",
+            "adminUsername": "[parameters('adminUsername')]",
+            "adminPassword": "[parameters('adminPassword')]",
+            "windowsConfiguration": {
+              "provisionVmAgent": "true"
+            }
+          },
+
+          "hardwareProfile": {
+            "vmSize": "Standard_D2s_v3"
+          },
+          "storageProfile": {
+            "imageReference": {
+              "id": "/subscriptions/877d4dbe-5af8-4b6e-835a-a40d1f31c5da/resourceGroups/aec-mgmt-rg/providers/Microsoft.Compute/galleries/SharedImageGallery/images/aiadvm-image-20211702/versions/0.0.1"
+            },
+            "osDisk": {
+              "name": "[concat(variables('vmName'),'OSDisk')]",
+              "createOption": "FromImage",
+              "managedDisk": {
+                "storageAccountType": "[parameters('diskStorageType')]"
+              }
+            }
+          },
+          "networkProfile": {
+            "networkInterfaces": [
+              {
+                "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('nicName'))]"
+              }
+            ]
+          }
+        },
+        "resources": [
+          {
+            "type": "extensions",
+            "name": "CustomScriptExtension",
+            "apiVersion": "2017-03-30",
+            "location": "[variables('location')]",
+            "dependsOn": [
+              "[variables('vmName')]"
+            ],
+            "properties": {
+              "publisher": "Microsoft.Compute",
+              "type": "CustomScriptExtension",
+              "typeHandlerVersion": "1.8",
+              "autoUpgradeMinorVersion": true,
+              "settings": {
+                "fileUris": [
+                  "https://experienceazure.blob.core.windows.net/templates/cloudlabs-common/cloudlabs-windows-functions.ps1",
+                  "https://experienceazure.blob.core.windows.net/templates/ai-iad/scripts/psscript01.ps1"
+
+                ],
+                "commandToExecute": "[concat('powershell -ExecutionPolicy Bypass -File ai-iad/scripts/psscript01.ps1', ' ',variables('cloudlabsCommon'))]"
+
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "[variables('storageaccountname')]",
+        "type": "Microsoft.Storage/storageAccounts",
+        "apiVersion": "2018-07-01",
+        "location": "[variables('location')]",
+        "kind": "StorageV2",
+        "sku": {
+          "name": "Standard_LRS",
+          "tier": "Standard"
+        },
+        "properties": {
+          "accessTier": "Hot"
+        },
+        "resources": [
+          {
+            "name": "[concat('default/', 'covid19temp')]",
+            "type": "blobServices/containers",
+            "apiVersion": "2018-07-01",
+            "dependsOn": [
+              "[variables('storageaccountname')]"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "[variables('mlstorageaccountname')]",
+        "type": "Microsoft.Storage/storageAccounts",
+        "apiVersion": "2018-07-01",
+        "location": "[variables('location')]",
+        "properties": {
+          "supportsHttpsTrafficOnly": "false"
+        },
+        "dependsOn": [],
+        "sku": {
+          "name": "Standard_LRS"
+        },
+        "kind": "Storage"
+      },
+      {
+        "apiVersion": "2018-11-19",
+        "name": "[variables('amlworkspacename')]",
+        "location": "[variables('location')]",
+        "type": "Microsoft.MachineLearningServices/workspaces",
+        "properties": {
+          "containerRegistry": "[variables('containerRegistryId')]",
+          "keyVault": "[variables('keyVaultId')]",
+          "storageAccount": "[variables('mlstorageAccountId')]",
+          "applicationInsights": "[variables('appInsightsId')]"
+        },
+        "sku": {
+          "tier": "enterprise",
+          "name": "enterprise"
+        },
+        "identity": {
+          "type": "systemAssigned"
+        },
+        "dependsOn": [
+          "[concat('Microsoft.KeyVault/vaults/', variables('keyvaultname'))]",
+          "[concat('Microsoft.Storage/storageAccounts/', variables('mlstorageaccountname'))]",
+          "[concat('microsoft.insights/components/', variables('appinsightname'))]",
+          "[concat('Microsoft.ContainerRegistry/registries/', variables('containerregistryname'))]"
+        ]
+      },
+      {
+        "apiVersion": "2016-10-01",
+        "name": "[variables('keyvaultname')]",
+        "location": "[variables('location')]",
+        "type": "Microsoft.KeyVault/vaults",
+        "properties": {
+          "enabledForDeployment": false,
+          "enabledForTemplateDeployment": false,
+          "enabledForDiskEncryption": false,
+
+          "tenantId": "[variables('AzureTenantID')]",
+          "sku": {
+            "name": "Standard",
+            "family": "A"
+          },
+          "networkAcls": {
+            "value": {
+              "defaultAction": "Allow",
+              "bypass": "AzureServices",
+              "virtualNetworkRules": [],
+              "ipRules": []
+            }
+          },
+          "accessPolicies": [
+            {
+              "tenantId": "[variables('AzureTenantID')]",
+              "objectId": "[parameters('azuserobjectid')]",
+              "permissions": {
+                "keys": [
+                  "Get",
+                  "List",
+                  "Update",
+                  "Create",
+                  "Import",
+                  "Delete",
+                  "Recover",
+                  "Backup",
+                  "Restore",
+                  "Decrypt",
+                  "Encrypt",
+                  "UnwrapKey",
+                  "WrapKey",
+                  "Verify",
+                  "Sign",
+                  "Purge"
+                ],
+                "secrets": [
+                  "Get",
+                  "List",
+                  "Set",
+                  "Delete",
+                  "Recover",
+                  "Backup",
+                  "Restore",
+                  "Purge"
+                ],
+                "certificates": [
+                  "Get",
+                  "List",
+                  "Update",
+                  "Create",
+                  "Import",
+                  "Delete",
+                  "Recover",
+                  "Backup",
+                  "Restore",
+                  "ManageContacts",
+                  "ManageIssuers",
+                  "GetIssuers",
+                  "ListIssuers",
+                  "SetIssuers",
+                  "DeleteIssuers",
+                  "Purge"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "[variables('appinsightname')]",
+        "type": "microsoft.insights/components",
+        "location": "[variables('location')]",
+        "apiVersion": "2014-08-01",
+        "properties": {
+          "ApplicationId": "[variables('appinsightname')]",
+          "Application_Type": "web",
+          "Flow_Type": "Redfield",
+          "Request_Source": "IbizaAIExtension"
+        }
+      },
+      {
+        "apiVersion": "2017-10-01",
+        "name": "[variables('containerregistryname')]",
+        "location": "[variables('location')]",
+        "type": "Microsoft.ContainerRegistry/registries",
+        "sku": {
+          "name": "Basic"
+        },
+        "properties": {
+          "adminUserEnabled": true
+        },
+        "kind": "Registry"
+      }
+    ],
+    "outputs": {
+      "ResourceGroupName": {
+        "type": "string",
+        "value": "[resourceGroup().Name]"
+      },
+      "Subscription ID": {
+        "type": "string",
+        "value": "[subscription().subscriptionId]"
+      },
+      "Jump VM DNS Name": {
+        "type": "string",
+        "value": "[reference(variables('publicIPAddressName'), '2016-03-30').dnsSettings.fqdn]"
+      },
+      "VM Admin Username": {
+        "type": "string",
+        "value": "[parameters('adminUsername')]"
+      },
+      "VM Admin Password": {
+        "type": "string",
+        "value": "[parameters('adminPassword')]"
+      },
+      "Storage Account Name": {
+        "value": "[variables('storageAccountName')]",
+        "type": "string"
+      },
+      "AML Workspace Name ": {
+        "value": "[variables('amlworkspacename')]",
+        "type": "string"
+      }
+    }
+  }
